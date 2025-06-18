@@ -54,10 +54,10 @@ func analyzeSentiment(comments []string) []map[string]interface{} {
 	retryDelay := 2 * time.Second
 
 	// Retry loop
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
 		resp, err = http.Post("http://localhost:5000/analyze", "application/json", bytes.NewBuffer(requestBody))
 		if err == nil {
-			break // success
+			break
 		}
 
 		log.Printf("Attempt %d: Python service not ready, retrying in %v...\n", i+1, retryDelay)

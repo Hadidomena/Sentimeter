@@ -12,12 +12,18 @@ def analyze():
     results = []
     sid = SentimentIntensityAnalyzer()
     sentiment_pipeline = pipeline("sentiment-analysis")
-
+    overallTB, overallNLTK, overallHF = 0, 0, 0
     for comment in comments:
         blob = TextBlob(comment)
-        sentiment = blob.sentiment.polarity  # range: [-1.0, 1.0]
-        results.append({"comment": comment, "sentimentTB": sentiment, "sentimentNLTK": sid.polarity_scores(comment), "sentimentHF": sentiment_pipeline(comment)})
+        sentimentTB = blob.sentiment.polarity  # range: [-1.0, 1.0]
+        sentimentNLTK = sid.polarity_scores(comment)['compound']
+        sentimentHF = sentiment_pipeline(comment)[0]['score']
+        overallTB += sentimentTB
+        overallNLTK += sentimentNLTK
+        overallHF += sentimentHF
+        results.append({"comment": comment, "sentimentTB": sentimentTB, "sentimentNLTK": sentimentNLTK, "sentimentHF": sentimentHF})
 
+    print( jsonify(overallTB, overallNLTK, overallHF))
     return jsonify(results)
 
 if __name__ == '__main__':
