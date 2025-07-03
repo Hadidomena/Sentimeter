@@ -1,70 +1,81 @@
 <html>
-  <head>
-    <title>Sentiment Analysis</title>
-  </head>
-  <body>
-    <h1>Sentiment Analysis</h1>
+	<head>
+		<title>Sentiment Analysis</title>
+	</head>
+	<body>
+		<h1>Sentiment Analysis</h1>
 
-    <!-- Input field and button -->
-    <input id="reddit-url" type="text" placeholder="Enter Reddit post URL" size="60" />
-    <button id="fetch-button">Fetch Sentiment</button>
+		<!-- Input field and button -->
+		<input id="reddit-url" type="text" placeholder="Enter Reddit post URL" size="60" />
+		<button id="fetch-button">Fetch Sentiment</button>
 
-    <!-- Where results will be inserted -->
-    <div id="results"></div>
+		<!-- Where results will be inserted -->
+		<div id="results"></div>
 
-    <script type="module">
-      const input = document.getElementById('reddit-url');
-      const button = document.getElementById('fetch-button');
-      const resultsDiv = document.getElementById('results');
+		<script type="module">
+			const input = document.getElementById('reddit-url');
+			const button = document.getElementById('fetch-button');
+			const resultsDiv = document.getElementById('results');
 
-      button.addEventListener('click', async () => {
-        const url = input.value.trim();
-        if (!url) {
-          alert("Please enter a Reddit post URL ending in `.json`");
-          return;
-        }
+			button.addEventListener('click', async () => {
+				const url = input.value.trim();
+				if (!url) {
+					alert("Please enter a Reddit post URL ending in `.json`");
+					return;
+				}
 
-        resultsDiv.innerHTML = "<p>Loading...</p>";
+				resultsDiv.innerHTML = "<p>Loading...</p>";
 
-        try {
-          const response = await fetch("http://localhost:3001/analyze-comments", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url })
-          });
+				try {
+					const response = await fetch("http://localhost:3001/analyze-comments", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ url })
+					});
 
-          if (!response.ok) {
-            throw new Error(`Server error: ${response.status}`);
-          }
+					if (!response.ok) {
+						throw new Error(`Server error: ${response.status}`);
+					}
 
-          const data = await response.json();
-          const meanScores = data.meanScores;
-          const comments = data.comments;
+					const data = await response.json();
+					const labelCounts = data.labelCounts || {};
+					const classDistribution = data.classDistribution || {};
+					const weightedScore = typeof data.weightedScore === "number" ? data.weightedScore : null;
+					const comments = Array.isArray(data.results) ? data.results : [];
 
-          resultsDiv.innerHTML = `
-            <h2>Mean Scores</h2>
-            <ul>
-              ${Object.entries(meanScores)
-                .map(([key, val]) => `<li><strong>${key}:</strong> ${val.toFixed(3)}</li>`)
-                .join("")}
-            </ul>
+					resultsDiv.innerHTML = `
+						<h2>Class Distribution</h2>
+						${Object.keys(classDistribution).length > 0
+							? `<ul>
+									${Object.entries(classDistribution)
+										.map(([key, val]) => `<li><strong>${key}:</strong> ${(val * 100).toFixed(1)}%</li>`)
+										.join("")}
+								</ul>`
+							: "<p>No class distribution available.</p>"}
 
-            <h2>Comments</h2>
-            <ul>
-              ${comments
-                .map((c, i) => `
-                  <li>
-                    <p><strong>Comment #${i + 1}:</strong> ${c.comment}</p>
-                    <pre>${JSON.stringify(c.scores, null, 2)}</pre>
-                  </li>
-                `)
-                .join("")}
-            </ul>
-          `;
-        } catch (err) {
-          resultsDiv.innerHTML = `<p style="color:red">Error: ${err.message}</p>`;
-        }
-      });
-    </script>
-  </body>
+						${weightedScore !== null
+							? `<p><strong>Weighted Score:</strong> ${weightedScore}</p>`
+							: ""}
+
+						<h2>Comments</h2>
+						${comments.length > 0
+							? `<ul>
+									${comments
+										.map((c, i) => `
+											<li>
+												<p><strong>Comment #${i + 1}:</strong> ${c.comment}</p>
+												<p><strong>Label:</strong> ${c.label} (${(c.confidence * 100).toFixed(1)}%)</p>
+											</li>
+										`)
+										.join("")}
+								</ul>`
+							: "<p>No comments analyzed.</p>"}
+					`;
+
+				} catch (err) {
+					resultsDiv.innerHTML = `<p style="color:red">Error: ${err.message}</p>`;
+				}
+			});
+		</script>
+	</body>
 </html>

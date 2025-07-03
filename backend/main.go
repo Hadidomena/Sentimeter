@@ -42,7 +42,12 @@ func getComments(postURL string) []string {
 
 	return result
 }
-func analyzeSentiment(comments []string) ([]map[string]interface{}, map[string]float64) {
+func analyzeSentiment(comments []string) (
+	[]map[string]interface{},
+	map[string]int,
+	map[string]float64,
+	float64,
+) {
 	requestBody, err := json.Marshal(map[string]interface{}{
 		"comments": comments,
 	})
@@ -54,13 +59,11 @@ func analyzeSentiment(comments []string) ([]map[string]interface{}, map[string]f
 	maxRetries := 5
 	retryDelay := 2 * time.Second
 
-	// Retry loop
 	for i := range maxRetries {
 		resp, err = http.Post("http://localhost:5000/analyze", "application/json", bytes.NewBuffer(requestBody))
 		if err == nil {
 			break
 		}
-
 		log.Printf("Attempt %d: Python service not ready, retrying in %v...\n", i+1, retryDelay)
 		time.Sleep(retryDelay)
 	}
@@ -75,26 +78,46 @@ func analyzeSentiment(comments []string) ([]map[string]interface{}, map[string]f
 		log.Fatal("Error decoding response:", err)
 	}
 
-	results := response["results"].([]interface{})
+	// Extract results
 	var commentResults []map[string]interface{}
-	for _, result := range results {
-		commentResults = append(commentResults, result.(map[string]interface{}))
-	}
-
-	meanScores := make(map[string]float64)
-	if meanData, ok := response["meanScores"].(map[string]interface{}); ok {
-		for key, value := range meanData {
-			if score, ok := value.(float64); ok {
-				meanScores[key] = score
+	if results, ok := response["results"].([]interface{}); ok {
+		for _, result := range results {
+			if resMap, ok := result.(map[string]interface{}); ok {
+				commentResults = append(commentResults, resMap)
 			}
 		}
 	}
 
-	return commentResults, meanScores
+	// Extract labelCounts
+	labelCounts := make(map[string]int)
+	if raw, ok := response["labelCounts"].(map[string]interface{}); ok {
+		for key, val := range raw {
+			if countFloat, ok := val.(float64); ok {
+				labelCounts[key] = int(countFloat)
+			}
+		}
+	}
+
+	// Extract classDistribution
+	classDistribution := make(map[string]float64)
+	if raw, ok := response["classDistribution"].(map[string]interface{}); ok {
+		for key, val := range raw {
+			if pct, ok := val.(float64); ok {
+				classDistribution[key] = pct
+			}
+		}
+	}
+
+	// Extract weightedScore
+	var weightedScore float64
+	if score, ok := response["weightedScore"].(float64); ok {
+		weightedScore = score
+	}
+
+	return commentResults, labelCounts, classDistribution, weightedScore
 }
 
 func analyzeHandler(w http.ResponseWriter, r *http.Request) {
-	// Allow cross-origin requests
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -134,11 +157,14 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, meanScores := analyzeSentiment(comments)
+	commentResults, labelCounts, classDistribution, weightedScore := analyzeSentiment(comments)
+
 	response := map[string]interface{}{
-		"comments":     results,
-		"meanScores":   meanScores,
-		"commentCount": len(comments),
+		"results":           commentResults,
+		"labelCounts":       labelCounts,
+		"classDistribution": classDistribution,
+		"weightedScore":     weightedScore,
+		"commentCount":      len(comments),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

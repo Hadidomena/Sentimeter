@@ -1,7 +1,12 @@
 from flask import Flask, request, jsonify
-from textblob import TextBlob
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
-from transformers import pipeline
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+from collections import Counter
+
+# Load model once at startup
+model_name = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSequenceClassification.from_pretrained(model_name)
+sentiment_pipeline = pipeline("sentiment-analysis", model=model, tokenizer=tokenizer)
 
 app = Flask(__name__)
 
@@ -9,27 +14,47 @@ app = Flask(__name__)
 def analyze():
     data = request.get_json()
     comments = data.get("comments", [])
+
     results = []
-    sid = SentimentIntensityAnalyzer()
-    sentiment_pipeline = pipeline("sentiment-analysis")
-    overallTB, overallNLTK, overallHF = 0, 0, 0
+    label_counts = Counter()
+
     for comment in comments:
-        blob = TextBlob(comment)
-        sentimentTB = blob.sentiment.polarity  # range: [-1.0, 1.0]
-        sentimentNLTK = sid.polarity_scores(comment)['compound']
-        sentimentHF = sentiment_pipeline(comment)[0]['score']
-        overallTB += sentimentTB
-        overallNLTK += sentimentNLTK
-        overallHF += sentimentHF
-        results.append({"comment": comment, "sentimentTB": sentimentTB, "sentimentNLTK": sentimentNLTK, "sentimentHF": sentimentHF})
+        if not comment.strip():
+            continue  # Skip empty comments
+
+        try:
+            analysis = sentiment_pipeline(comment)[0]  # {'label': 'positive', 'score': 0.98}
+            label = analysis['label'].lower()
+            score = analysis['score']
+
+            label_counts[label] += 1
+            results.append({
+                "comment": comment,
+                "label": label,
+                "confidence": round(score, 3)
+            })
+        except Exception as e:
+            results.append({
+                "comment": comment,
+                "label": "error",
+                "confidence": 0,
+                "error": str(e)
+            })
+
+    total = sum(label_counts.values())
+    class_distribution = {
+        label: round(count / total, 3) for label, count in label_counts.items()
+    }
+
+    sentiment_score = (
+        label_counts.get("positive", 0) - label_counts.get("negative", 0)
+    ) / total if total > 0 else 0
 
     return jsonify({
         "results": results,
-        "meanScores": {
-            "meanTB": overallTB / len(comments),
-            "meanNLTK": overallNLTK / len(comments),
-            "meanHF": overallHF / len(comments)
-        }
+        "labelCounts": dict(label_counts),
+        "classDistribution": class_distribution,
+        "weightedScore": round(sentiment_score, 3)
     })
 
 if __name__ == '__main__':
