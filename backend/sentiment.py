@@ -23,8 +23,14 @@ def analyze():
         overallHF += sentimentHF
         results.append({"comment": comment, "sentimentTB": sentimentTB, "sentimentNLTK": sentimentNLTK, "sentimentHF": sentimentHF})
 
-    print( jsonify(overallTB, overallNLTK, overallHF))
-    return jsonify(results)
+    return jsonify({
+        "results": results,
+        "meanScores": {
+            "meanTB": overallTB / len(comments),
+            "meanNLTK": overallNLTK / len(comments),
+            "meanHF": overallHF / len(comments)
+        }
+    })
 
 if __name__ == '__main__':
     app.run(port=5000)
