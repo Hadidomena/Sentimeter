@@ -1,0 +1,326 @@
+export function initSentimentAnalysis() {
+	const input = document.getElementById('reddit-url');
+	const button = document.getElementById('fetch-button');
+	const resultsDiv = document.getElementById('results');
+
+	// Check if elements exist before adding event listeners
+	if (!input || !button || !resultsDiv) {
+		console.error('Required DOM elements not found');
+		return;
+	}
+
+	button.addEventListener('click', async () => {
+		const url = input.value.trim();
+		if (!url) {
+			alert("Please enter a Reddit post URL");
+			return;
+		}
+
+		// Get selected analysis method
+		const selectedMethod = document.querySelector('input[name="method"]:checked')?.value || 'sentiment_only';
+		
+		// Update UI to show loading state
+		button.disabled = true;
+		button.textContent = 'Analyzing...';
+		resultsDiv.innerHTML = '<div class="loading">Loading...</div>';
+
+		try {
+			const response = await fetch("http://localhost:3001/analyze-comments", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ 
+					url: url,
+					analysis_method: selectedMethod
+				})
+			});
+
+			if (!response.ok) {
+				throw new Error(`Server error: ${response.status}`);
+			}
+
+			const data = await response.json();
+			displayResults(data);
+
+		} catch (err) {
+			resultsDiv.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+		} finally {
+			// Reset button state
+			button.disabled = false;
+			button.textContent = 'Analyze';
+		}
+	});
+}
+
+function displayResults(data) {
+	const resultsDiv = document.getElementById('results');
+	const analysisMethod = data.analysis_method || 'sentiment_only';
+	
+	let html = `
+		<div class="results">
+			<div class="post-info">
+				<h2>Post Information</h2>
+				<h3>${data.post?.title || 'No title available'}</h3>
+				${data.post?.text ? `<p><strong>Text:</strong> ${data.post.text}</p>` : ''}
+				<p><strong>Analysis Method:</strong> ${analysisMethod}</p>
+				<p><strong>Comments Analyzed:</strong> ${data.commentCount || 0}</p>
+			</div>
+	`;
+
+	if (analysisMethod === 'sentiment_only') {
+		// Original sentiment-only display
+		html += displaySentimentOnlyResults(data);
+	} else if (analysisMethod === 'advanced_sentiment') {
+		// Advanced sentiment with sarcasm detection
+		html += displayAdvancedSentimentResults(data);
+	} else if (analysisMethod === 'emotion_analysis') {
+		// Comprehensive emotion analysis
+		html += displayEmotionAnalysisResults(data);
+	} else {
+		// Agreement analysis display
+		html += displayAgreementResults(data);
+	}
+
+	html += '</div>';
+	resultsDiv.innerHTML = html;
+}
+
+function displaySentimentOnlyResults(data) {
+	const labelCounts = data.labelCounts || {};
+	const classDistribution = data.classDistribution || {};
+	const weightedScore = data.weightedScore;
+	const comments = data.results || [];
+
+	return `
+		<div class="statistics">
+			<div class="stat-box">
+				<h3>Sentiment Distribution</h3>
+				${Object.keys(classDistribution).length > 0
+					? `<ul>
+						${Object.entries(classDistribution)
+							.map(([key, val]) => `<li><strong>${key}:</strong> ${(val * 100).toFixed(1)}%</li>`)
+							.join("")}
+						</ul>`
+					: "<p>No data available.</p>"}
+				${weightedScore !== null && weightedScore !== undefined
+					? `<p><strong>Weighted Score:</strong> ${weightedScore.toFixed(3)}</p>`
+					: ""}
+			</div>
+		</div>
+
+		<h3>Comments Analysis</h3>
+		<div class="comments-list">
+			${comments.length > 0
+				? comments.map((c, i) => `
+					<div class="comment-item">
+						<div class="comment-text">"${c.comment}"</div>
+						<div class="comment-analysis">
+							<span class="sentiment-${c.label}">
+								<strong>Sentiment:</strong> ${c.label} (${(c.confidence * 100).toFixed(1)}%)
+							</span>
+						</div>
+					</div>
+				`).join("")
+				: "<p>No comments analyzed.</p>"}
+		</div>
+	`;
+}
+
+function displayAdvancedSentimentResults(data) {
+	const sentimentStats = data.statistics || {};
+	const comments = data.results || [];
+
+	return `
+		<div class="statistics">
+			<div class="stat-box">
+				<h3>Sentiment Distribution</h3>
+				${sentimentStats.sentiment_distribution ? 
+					`<ul>
+						${Object.entries(sentimentStats.sentiment_distribution)
+							.map(([key, val]) => `<li><strong>${key}:</strong> ${(val * 100).toFixed(1)}%</li>`)
+							.join("")}
+						</ul>`
+					: "<p>No sentiment data available.</p>"}
+			</div>
+			
+			<div class="stat-box">
+				<h3>Sarcasm Analysis</h3>
+				${sentimentStats.sarcasm_distribution ? 
+					`<ul>
+						${Object.entries(sentimentStats.sarcasm_distribution)
+							.map(([key, val]) => `<li><strong>${key}:</strong> ${(val * 100).toFixed(1)}%</li>`)
+							.join("")}
+						</ul>
+						<p><strong>Sarcastic Comments:</strong> ${sentimentStats.sarcastic_percentage || 0}%</p>`
+					: "<p>No sarcasm data available.</p>"}
+			</div>
+		</div>
+
+		<h3>Advanced Comment Analysis</h3>
+		<div class="comments-list">
+			${comments.length > 0
+				? comments.map((c, i) => {
+					const analysis = c.analysis || {};
+					const isSarcastic = analysis.is_sarcastic || false;
+					
+					return `
+						<div class="comment-item">
+							<div class="comment-text">"${c.comment}"</div>
+							<div class="comment-analysis">
+								<span class="sentiment-${analysis.label}">
+									<strong>Sentiment:</strong> ${analysis.label} (${((analysis.confidence || 0) * 100).toFixed(1)}%)
+									${isSarcastic ? `<span class="sarcasm-indicator">SARCASTIC</span>` : ''}
+								</span>
+								${isSarcastic && analysis.surface_sentiment ? 
+									`<span class="surface-sentiment">
+										Surface: ${analysis.surface_sentiment} (${((analysis.surface_confidence || 0) * 100).toFixed(1)}%)
+									</span>` : ''}
+							</div>
+						</div>
+					`;
+				}).join("")
+				: "<p>No comments analyzed.</p>"}
+		</div>
+	`;
+}
+
+function displayEmotionAnalysisResults(data) {
+	const sentimentStats = data.statistics || {};
+	const comments = data.results || [];
+
+	return `
+		<div class="statistics">
+			<div class="stat-box">
+				<h3>Sentiment Distribution</h3>
+				${sentimentStats.sentiment_distribution ? 
+					`<ul>
+						${Object.entries(sentimentStats.sentiment_distribution)
+							.map(([key, val]) => `<li><strong>${key}:</strong> ${(val * 100).toFixed(1)}%</li>`)
+							.join("")}
+						</ul>
+						<p><strong>Sentiment Score:</strong> ${(sentimentStats.weighted_sentiment_score || 0).toFixed(3)}</p>`
+					: "<p>No sentiment data available.</p>"}
+			</div>
+			
+			<div class="stat-box">
+				<h3>Emotion Distribution</h3>
+				${sentimentStats.emotion_distribution ? 
+					`<ul>
+						${Object.entries(sentimentStats.emotion_distribution)
+							.map(([key, val]) => `<li><strong>${key}:</strong> ${(val * 100).toFixed(1)}%</li>`)
+							.join("")}
+						</ul>`
+					: "<p>No emotion data available.</p>"}
+			</div>
+			
+			<div class="stat-box">
+				<h3>Implied Meaning Analysis</h3>
+				${sentimentStats.implied_reasons_distribution ? 
+					`<ul>
+						${Object.entries(sentimentStats.implied_reasons_distribution)
+							.map(([key, val]) => `<li><strong>${key.replace('_', ' ')}:</strong> ${(val * 100).toFixed(1)}%</li>`)
+							.join("")}
+						</ul>`
+					: "<p>No implied meaning data available.</p>"}
+			</div>
+		</div>
+
+		<h3>Comprehensive Comment Analysis</h3>
+		<div class="comments-list">
+			${comments.length > 0
+				? comments.map((c, i) => {
+					const analysis = c.analysis || {};
+					const isSarcastic = analysis.is_sarcastic || false;
+					const impliedReason = analysis.implied_reason || 'literal';
+					
+					return `
+						<div class="comment-item">
+							<div class="comment-text">"${c.comment}"</div>
+							<div class="comment-analysis">
+								<div style="margin-bottom: 8px;">
+									<span class="sentiment-${analysis.final_sentiment}">
+										<strong>Final Sentiment:</strong> ${analysis.final_sentiment} (${((analysis.final_confidence || 0) * 100).toFixed(1)}%)
+										${isSarcastic ? `<span class="sarcasm-indicator">SARCASTIC</span>` : ''}
+									</span>
+								</div>
+								<div style="margin-bottom: 8px;">
+									<strong>Dominant Emotion:</strong> ${analysis.dominant_emotion || 'unknown'}
+									${analysis.surface_sentiment !== analysis.final_sentiment ? 
+										`<span class="surface-sentiment">Surface: ${analysis.surface_sentiment}</span>` : ''}
+								</div>
+								<div style="font-size: 0.85em; color: #666;">
+									<strong>Analysis Type:</strong> ${impliedReason.replace('_', ' ')}
+									${analysis.emotion_scores ? 
+										`<br><strong>Top Emotions:</strong> ${Object.entries(analysis.emotion_scores)
+											.sort(([,a], [,b]) => b - a)
+											.slice(0, 3)
+											.map(([emotion, score]) => `${emotion} (${(score * 100).toFixed(0)}%)`)
+											.join(', ')}` : ''}
+								</div>
+							</div>
+						</div>
+					`;
+				}).join("")
+				: "<p>No comments analyzed.</p>"}
+		</div>
+	`;
+}
+
+function displayAgreementResults(data) {
+	const sentimentStats = data.statistics?.sentiment || {};
+	const agreementStats = data.statistics?.agreement || {};
+	const comments = data.results || [];
+
+	return `
+		<div class="statistics">
+			<div class="stat-box">
+				<h3>Sentiment Distribution</h3>
+				${sentimentStats.distribution ? 
+					`<ul>
+						${Object.entries(sentimentStats.distribution)
+							.map(([key, val]) => `<li><strong>${key}:</strong> ${(val * 100).toFixed(1)}%</li>`)
+							.join("")}
+						</ul>
+						<p><strong>Sentiment Score:</strong> ${(sentimentStats.weighted_score || 0).toFixed(3)}</p>`
+					: "<p>No sentiment data available.</p>"}
+			</div>
+			
+			<div class="stat-box">
+				<h3>Agreement Analysis</h3>
+				${agreementStats.distribution ? 
+					`<ul>
+						${Object.entries(agreementStats.distribution)
+							.map(([key, val]) => `<li><strong>${key}:</strong> ${(val * 100).toFixed(1)}%</li>`)
+							.join("")}
+						</ul>
+						<p><strong>Agreement Score:</strong> ${(agreementStats.weighted_score || 0).toFixed(3)}</p>`
+					: "<p>No agreement data available.</p>"}
+			</div>
+		</div>
+
+		<h3>Detailed Comment Analysis</h3>
+		<div class="comments-list">
+			${comments.length > 0
+				? comments.map((c, i) => {
+					const agreement = c.agreement || {};
+					const sentiment = c.sentiment || {};
+					
+					return `
+						<div class="comment-item">
+							<div class="comment-text">"${c.comment}"</div>
+							<div class="comment-analysis">
+								<span class="sentiment-${sentiment.label}">
+									<strong>Sentiment:</strong> ${sentiment.label} (${((sentiment.confidence || 0) * 100).toFixed(1)}%)
+								</span>
+								<span class="agreement-${agreement.agreement}">
+									<strong>Agreement:</strong> ${agreement.agreement} 
+									${agreement.confidence ? `(${(agreement.confidence * 100).toFixed(1)}%)` : ''}
+									${agreement.similarity ? `| Similarity: ${(agreement.similarity * 100).toFixed(1)}%` : ''}
+								</span>
+							</div>
+						</div>
+					`;
+				}).join("")
+				: "<p>No comments analyzed.</p>"}
+		</div>
+	`;
+}
