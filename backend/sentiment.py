@@ -3,6 +3,8 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipe
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import Counter
+import re
+import numpy as np
 import numpy as np
 import re
 
@@ -517,6 +519,172 @@ def analyze_with_agreement():
                 "correction_rate": round(enhancement_stats["corrections_made"] / total * 100, 1) if total > 0 else 0,
                 "pattern_types": dict(enhancement_stats["pattern_types_detected"])
             }
+        }
+    })
+
+@app.route('/analyze_advanced', methods=['POST'])
+def analyze_advanced():
+    """Advanced sentiment analysis with sarcasm detection"""
+    data = request.get_json()
+    comments = data.get("comments", [])
+    
+    results = []
+    label_counts = Counter()
+    sarcasm_counts = Counter()
+    
+    for comment in comments:
+        if not comment.strip():
+            continue
+            
+        try:
+            # Use enhanced sentiment analysis
+            analysis = analyze_enhanced_sentiment(comment)
+            label = analysis['label']
+            label_counts[label] += 1
+            
+            # Check if sarcasm was detected
+            corrections = analysis.get('analysis', {}).get('corrections_applied', [])
+            is_sarcastic = any('sarcasm' in correction for correction in corrections)
+            sarcasm_counts['sarcastic' if is_sarcastic else 'literal'] += 1
+            
+            results.append({
+                "comment": comment,
+                "analysis": {
+                    "label": label,
+                    "confidence": analysis['confidence'],
+                    "is_sarcastic": is_sarcastic,
+                    "surface_sentiment": analysis.get('original', {}).get('label', label),
+                    "surface_confidence": analysis.get('original', {}).get('confidence', analysis['confidence']),
+                    "corrections_applied": corrections
+                }
+            })
+            
+        except Exception as e:
+            results.append({
+                "comment": comment,
+                "analysis": {"label": "error", "confidence": 0},
+                "error": str(e)
+            })
+    
+    total = len([r for r in results if r.get('analysis', {}).get('label') != 'error'])
+    
+    # Calculate distributions
+    sentiment_distribution = {
+        label: round(count / total, 3) for label, count in label_counts.items()
+    } if total > 0 else {}
+    
+    sarcasm_distribution = {
+        label: round(count / total, 3) for label, count in sarcasm_counts.items()
+    } if total > 0 else {}
+    
+    sarcastic_percentage = round((sarcasm_counts.get('sarcastic', 0) / total * 100), 1) if total > 0 else 0
+    
+    return jsonify({
+        "results": results,
+        "statistics": {
+            "sentiment_distribution": sentiment_distribution,
+            "sarcasm_distribution": sarcasm_distribution,
+            "sarcastic_percentage": sarcastic_percentage,
+            "total_comments": total
+        }
+    })
+
+@app.route('/analyze_emotion', methods=['POST'])
+def analyze_emotion():
+    """Comprehensive emotion and implied sentiment analysis"""
+    data = request.get_json()
+    comments = data.get("comments", [])
+    
+    results = []
+    sentiment_counts = Counter()
+    emotion_counts = Counter()
+    implied_reason_counts = Counter()
+    
+    for comment in comments:
+        if not comment.strip():
+            continue
+            
+        try:
+            # Get enhanced sentiment analysis
+            sentiment_analysis = analyze_enhanced_sentiment(comment)
+            
+            # Get detailed emotion analysis
+            emotion_results = emotion_pipeline(comment)[0]
+            emotion_scores = {item['label']: item['score'] for item in emotion_results}
+            dominant_emotion = max(emotion_scores, key=emotion_scores.get)
+            
+            # Determine implied reason based on corrections
+            corrections = sentiment_analysis.get('analysis', {}).get('corrections_applied', [])
+            implied_reason = 'literal'
+            if corrections:
+                if 'frustrated_affection' in corrections:
+                    implied_reason = 'frustrated_affection'
+                elif 'internet_slang_positive' in corrections:
+                    implied_reason = 'internet_slang'
+                elif 'fanart_innuendo' in corrections:
+                    implied_reason = 'fanart_context'
+                elif 'sarcastic_praise' in corrections:
+                    implied_reason = 'sarcasm'
+                elif 'emotion_override' in str(corrections):
+                    implied_reason = 'emotion_override'
+                else:
+                    implied_reason = 'pattern_detected'
+            
+            final_sentiment = sentiment_analysis['label']
+            sentiment_counts[final_sentiment] += 1
+            emotion_counts[dominant_emotion] += 1
+            implied_reason_counts[implied_reason] += 1
+            
+            results.append({
+                "comment": comment,
+                "analysis": {
+                    "final_sentiment": final_sentiment,
+                    "final_confidence": sentiment_analysis['confidence'],
+                    "surface_sentiment": sentiment_analysis.get('original', {}).get('label', final_sentiment),
+                    "surface_confidence": sentiment_analysis.get('original', {}).get('confidence', sentiment_analysis['confidence']),
+                    "dominant_emotion": dominant_emotion,
+                    "emotion_scores": emotion_scores,
+                    "implied_reason": implied_reason,
+                    "is_sarcastic": 'sarcasm' in str(corrections),
+                    "corrections_applied": corrections
+                }
+            })
+            
+        except Exception as e:
+            results.append({
+                "comment": comment,
+                "analysis": {"final_sentiment": "error", "final_confidence": 0},
+                "error": str(e)
+            })
+    
+    total = len([r for r in results if r.get('analysis', {}).get('final_sentiment') != 'error'])
+    
+    # Calculate distributions
+    sentiment_distribution = {
+        label: round(count / total, 3) for label, count in sentiment_counts.items()
+    } if total > 0 else {}
+    
+    emotion_distribution = {
+        emotion: round(count / total, 3) for emotion, count in emotion_counts.items()
+    } if total > 0 else {}
+    
+    implied_reasons_distribution = {
+        reason: round(count / total, 3) for reason, count in implied_reason_counts.items()
+    } if total > 0 else {}
+    
+    # Calculate weighted sentiment score
+    weighted_sentiment_score = (
+        sentiment_counts.get("positive", 0) - sentiment_counts.get("negative", 0)
+    ) / total if total > 0 else 0
+    
+    return jsonify({
+        "results": results,
+        "statistics": {
+            "sentiment_distribution": sentiment_distribution,
+            "emotion_distribution": emotion_distribution,
+            "implied_reasons_distribution": implied_reasons_distribution,
+            "weighted_sentiment_score": round(weighted_sentiment_score, 3),
+            "total_comments": total
         }
     })
 
